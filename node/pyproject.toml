@@ -1,0 +1,20 @@
+[project]
+name = "hermes-node"
+version = "0.1.0"
+description = "Device-side client for hermes-nodes: exposes local tools (exec_command / read_file / write_file / sys_info) and stays persistently connected to a hermes-node-hub so the Hermes agent can call them remotely."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "websockets>=12.0",
+]
+
+[project.scripts]
+hermes-node = "hermes_node.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["hermes_node*"]

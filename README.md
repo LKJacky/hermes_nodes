@@ -1,0 +1,104 @@
+# hermes-nodes
+
+让 Hermes 通过一个 hub 动态注册并调用**多台设备**的工具 —— OpenClaw Nodes 的 Hermes 原生实现。
+
+```
+┌─ 每台设备 (hermes-node) ────────┐      ┌─ Hermes 进程内 (hermes-node-hub 插件) ─┐
+│  本地工具:                       │      │  HTTP+WS 服务器 (默认 127.0.0.1:9721)    │
+│  · exec_command  执行命令        │─────▶│  WS 注册 (hello/心跳/调用/结果)         │
+│  · read_file     读文件          │ WS   │  注册表持久化 (JSON)                    │
+│  · write_file    写文件          │ 心跳 │  4 个工具:                             │
+│  · sys_info      系统信息        │◀─────│  nodes_list / node_call /              │
+│  断线自动重连 (5s)               │      │  nodes_run / nodes_fanout               │
+└────────────────────────────────┘      └───────────────────────────────────────┘
+```
+
+**核心设计**：hub 只注册 4 个固定分发工具，设备注册是**数据**（注册表）而不是工具定义 —— 新设备上线后**无需重启 Hermes**，`nodes_list` 立即可见、`node_call` 立即可调。
+
+## 快速开始
+
+### 1. 安装 hub 插件（跑 Hermes 的那台机器）
+
+```bash
+# 把插件目录拷到 Hermes 插件目录（或 git clone 后用 hermes plugins install）
+cp -r hub/hermes_node_hub ~/.hermes/plugins/hermes-node-hub
+
+# 可选：配置 token 和端口（强烈建议配 token）
+cat >> ~/.hermes/.env <<'EOF'
+HERMES_NODE_HUB_TOKEN=换成你的强随机密钥      # openssl rand -hex 32
+HERMES_NODE_HUB_PORT=9721
+EOF
+
+# 重启 Hermes —— 之后对话里就能用 nodes_list 等工具了
+```
+
+> 插件会在**第一次调用工具时**才启动服务器（懒加载），不占资源。
+
+### 2. 在每台设备上装 node
+
+```bash
+pip install ./node          # 或 pip install "hermes-node @ git+https://你的仓库.git"
+
+# 启动（前台试跑）
+hermes-node --hub http://hub-host:9721 --token <TOKEN> --device macbook
+```
+
+后台常驻（选一个）：
+
+- **macOS (launchd)**：`docs/install.md` 里有现成 plist
+- **Linux (systemd)**：`docs/install.md` 里有现成 unit
+- 或者最简单：`nohup hermes-node --hub ... --token ... &`
+
+### 3. 用起来
+
+在 Hermes 对话里（工具注入到所有平台）：
+
+```
+nodes_list                      → 查看所有已注册设备 + 在线状态
+nodes_run device=macbook command="df -h"   → 在 macbook 上执行命令
+node_call device=devbox tool=read_file args={"path": "/etc/hosts"}
+nodes_fanout tool=sys_info      → 所有在线设备的系统信息一把梭
+```
+
+## 配置项（环境变量）
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `HERMES_NODE_HUB_HOST` | `127.0.0.1` | hub 绑定地址 |
+| `HERMES_NODE_HUB_PORT` | `9721` | hub 端口 |
+| `HERMES_NODE_HUB_TOKEN` | 空 | 共享密钥；为空时仅建议 loopback 部署 |
+| `HERMES_NODE_HUB_REGISTRY_FILE` | `~/.hermes/node-hub-registry.json` | 注册表持久化路径 |
+| `HERMES_NODE_HUB_HEARTBEAT_TIMEOUT` | `45` | 心跳超时（秒），超时判离线 |
+| `HERMES_NODE_HUB_CALL_TIMEOUT` | `120` | 单次调用默认超时（秒） |
+
+node 端：`HERMES_NODE_HUB`（hub URL）、`HERMES_NODE_TOKEN`、`HERMES_NODE_DEVICE`（设备名，默认主机名）。
+
+## 安全
+
+- 每个请求/连接都要校验共享 token（`secrets.compare_digest` 恒定时间比较）
+- hub 默认只绑 `127.0.0.1` —— 远程设备请走 **Tailscale** 或 **SSH 隧道**（见 `docs/install.md`），不要直接暴露公网
+- 每台设备一个 token 粒度可做到最小权限（想细粒度就每台设备跑一个独立 hub 端口）
+
+## 目录结构
+
+```
+hub/hermes_node_hub/   Hermes 插件（server / registry / 4 个工具）
+node/                  设备端 Python 包（pip 安装）
+docs/protocol.md       注册与调用协议规范
+docs/install.md        systemd / launchd / Tailscale 部署
+examples/node-config.yaml  配置示例
+smoke_test.py          端到端冒烟测试（python3 smoke_test.py）
+```
+
+## 协议速览（详见 docs/protocol.md）
+
+```
+注册:  node → hub  WS /ws?token=...  hello {device, platform, capabilities}
+心跳:  node → hub  {"type":"heartbeat"}               每 15s
+调用:  hub  → node  {"type":"call","id","tool","args"} 
+结果:  node → hub  {"type":"result","id","ok","output"}
+```
+
+## 许可证
+
+MIT

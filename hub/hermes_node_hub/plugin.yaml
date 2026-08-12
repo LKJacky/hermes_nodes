@@ -1,0 +1,10 @@
+name: hermes-node-hub
+version: 0.1.0
+description: "Dynamic device registry for hermes-nodes. Exposes a server URL (default http://127.0.0.1:9721); hermes-node devices dial in over WebSocket to register themselves and stay persistently connected, so the agent can call tools (exec_command / read_file / write_file / sys_info) on any registered device. Tools: nodes_list, node_call, nodes_run, nodes_fanout."
+author: "Jacky + Hermes"
+kind: backend
+provides_tools:
+  - nodes_list
+  - node_call
+  - nodes_run
+  - nodes_fanout
