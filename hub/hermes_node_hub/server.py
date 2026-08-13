@@ -156,20 +156,50 @@ _server_thread: Optional[threading.Thread] = None
 _start_lock = threading.Lock()
 
 
+def _port_open(host: str, port: int) -> bool:
+    """True if something already listens on host:port (another Hermes process runs the hub)."""
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
 def start_server() -> bool:
-    """Start the uvicorn server in a daemon thread. Idempotent."""
+    """Start the uvicorn server in a daemon thread. Idempotent.
+
+    Safe to call from plugin load (eager) and from tool handlers (lazy):
+    if another Hermes process already bound the port, we detect it and skip
+    instead of crashing on a double bind.
+    """
     global _server_thread
     with _start_lock:
         if _server_thread is not None and _server_thread.is_alive():
             return True
+        if _port_open(config.hub_host(), config.hub_port()):
+            logger.info(
+                "hermes-node-hub already listening on %s:%s — not starting a second server",
+                config.hub_host(),
+                config.hub_port(),
+            )
+            return True
+
+        def _run() -> None:
+            try:
+                uvicorn.run(
+                    app,
+                    host=config.hub_host(),
+                    port=config.hub_port(),
+                    log_level="warning",
+                    access_log=False,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("hermes-node-hub server exited: %s", exc)
+
         _server_thread = threading.Thread(
-            target=lambda: uvicorn.run(
-                app,
-                host=config.hub_host(),
-                port=config.hub_port(),
-                log_level="warning",
-                access_log=False,
-            ),
+            target=_run,
             name="hermes-node-hub",
             daemon=True,
         )

@@ -211,6 +211,10 @@ def register(ctx) -> None:
             description=schema.get("description", ""),
             emoji=emoji,
         )
+    # Eager start: devices should be able to register at any time, not only
+    # after the agent first calls a nodes_* tool. start_server() is idempotent
+    # and skips if another process already holds the port.
+    start_server()
     logger.info(
         "hermes-node-hub plugin ready. Hub URL: http://%s:%s (token set: %s)",
         config.hub_host(),
