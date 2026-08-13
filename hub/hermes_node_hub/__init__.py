@@ -122,7 +122,7 @@ def _resolve_or_error(device: str):
     return node_id, None
 
 
-def _handle_nodes_list(args: dict) -> str:
+def _handle_nodes_list(args: dict, **kwargs) -> str:
     start_server()
     devices = get_registry().list_public()
     name = (args or {}).get("device")
@@ -131,7 +131,7 @@ def _handle_nodes_list(args: dict) -> str:
     return tool_result(devices=devices, count=len(devices))
 
 
-def _handle_node_call(args: dict) -> str:
+def _handle_node_call(args: dict, **kwargs) -> str:
     start_server()
     device = (args or {}).get("device")
     tool = (args or {}).get("tool")
@@ -146,7 +146,7 @@ def _handle_node_call(args: dict) -> str:
     return tool_result(**result)
 
 
-def _handle_nodes_run(args: dict) -> str:
+def _handle_nodes_run(args: dict, **kwargs) -> str:
     start_server()
     device = (args or {}).get("device")
     command = (args or {}).get("command")
@@ -171,7 +171,7 @@ def _handle_nodes_run(args: dict) -> str:
     return tool_result(**result)
 
 
-def _handle_nodes_fanout(args: dict) -> str:
+def _handle_nodes_fanout(args: dict, **kwargs) -> str:
     start_server()
     tool = (args or {}).get("tool")
     if not tool:
