@@ -15,9 +15,39 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Candidates for the Hermes .env file. Different Hermes surfaces (CLI,
+# gateway, WebUI agent workers) may run with different $HOME values, so try
+# the known real paths. Process env vars always win over the file.
+_ENV_CANDIDATES = (
+    Path("/home/hermeswebui/.hermes/.env"),
+    Path(os.environ.get("HERMES_HOME", "")) / ".env",
+    Path.home() / ".hermes" / ".env",
+)
+
+
+def _read_env_file(name: str) -> str:
+    """Read a key from the Hermes .env file (KEY=VALUE lines, # comments)."""
+    for path in _ENV_CANDIDATES:
+        try:
+            if not path.exists():
+                continue
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                if key.strip() == name:
+                    return value.strip().strip('"').strip("'")
+        except Exception:
+            continue
+    return ""
+
 
 def _env(name: str, default: str) -> str:
-    return os.environ.get(name, default)
+    value = os.environ.get(name)
+    if value:
+        return value
+    return _read_env_file(name) or default
 
 
 def hub_host() -> str:
