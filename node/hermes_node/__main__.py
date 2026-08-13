@@ -44,6 +44,14 @@ def main(argv=None) -> int:
         action="store_true",
         help="Exit after the connection drops instead of reconnecting forever.",
     )
+    parser.add_argument(
+        "--idle-timeout",
+        type=float,
+        default=float(os.environ.get("HERMES_NODE_IDLE_TIMEOUT", "0")),
+        help="Disconnect and exit after N seconds without any tool call "
+             "(hot-plug: connect on demand, serve, drop off). 0 = stay connected "
+             "indefinitely (default: env HERMES_NODE_IDLE_TIMEOUT or 0).",
+    )
     parser.add_argument("--verbose", action="store_true", help="Debug logging.")
     args = parser.parse_args(argv)
 
@@ -53,7 +61,15 @@ def main(argv=None) -> int:
     )
 
     try:
-        asyncio.run(run(args.hub, args.token, args.device, once=args.once))
+        asyncio.run(
+            run(
+                args.hub,
+                args.token,
+                args.device,
+                once=args.once,
+                idle_timeout=args.idle_timeout,
+            )
+        )
     except KeyboardInterrupt:
         pass
     return 0

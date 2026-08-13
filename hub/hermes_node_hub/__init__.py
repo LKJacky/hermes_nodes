@@ -20,13 +20,28 @@ logger = logging.getLogger("hermes_node_hub")
 
 _NODES_LIST_SCHEMA = {
     "name": "nodes_list",
-    "description": "List all hermes-node devices registered with the hub: name, node_id, platform, capabilities, online status. Optionally filter by device name.",
+    "description": "List all hermes-node devices registered with the hub: name, node_id, platform, capabilities, online status. Stale offline devices (no heartbeat for HERMES_NODE_HUB_OFFLINE_TTL, default 300s) are pruned automatically. Optionally filter by device name.",
     "parameters": {
         "type": "object",
         "properties": {
             "device": {
                 "type": "string",
                 "description": "Optional device name filter (exact match on name or node_id).",
+            },
+        },
+        "required": [],
+    },
+}
+
+_NODES_PRUNE_SCHEMA = {
+    "name": "nodes_prune",
+    "description": "Manually prune offline devices from the registry: remove devices whose last heartbeat is older than ttl seconds (default HERMES_NODE_HUB_OFFLINE_TTL = 300). Returns how many were removed. Useful for hot-plugged nodes that disconnected and will not come back.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "ttl": {
+                "type": "integer",
+                "description": "Prune devices idle for more than this many seconds (default 300). Pass 0 to remove every offline device immediately.",
             },
         },
         "required": [],
@@ -124,11 +139,21 @@ def _resolve_or_error(device: str):
 
 def _handle_nodes_list(args: dict, **kwargs) -> str:
     start_server()
+    get_registry().prune_offline()  # hot-plug: drop stale offline entries first
     devices = get_registry().list_public()
     name = (args or {}).get("device")
     if name:
         devices = [d for d in devices if d["name"] == name or d["node_id"] == name]
     return tool_result(devices=devices, count=len(devices))
+
+
+def _handle_nodes_prune(args: dict, **kwargs) -> str:
+    start_server()
+    ttl = (args or {}).get("ttl")
+    if ttl is not None and ttl < 0:
+        return tool_error("ttl must be >= 0")
+    removed = get_registry().prune_offline(ttl=ttl)
+    return tool_result(removed=removed, remaining=len(get_registry().list_public()))
 
 
 def _handle_node_call(args: dict, **kwargs) -> str:
@@ -194,6 +219,7 @@ def _handle_nodes_fanout(args: dict, **kwargs) -> str:
 
 _TOOLS = (
     ("nodes_list", _NODES_LIST_SCHEMA, _handle_nodes_list, "📡"),
+    ("nodes_prune", _NODES_PRUNE_SCHEMA, _handle_nodes_prune, "🧹"),
     ("node_call", _NODE_CALL_SCHEMA, _handle_node_call, "🖥️"),
     ("nodes_run", _NODES_RUN_SCHEMA, _handle_nodes_run, "⚡"),
     ("nodes_fanout", _NODES_FANOUT_SCHEMA, _handle_nodes_fanout, "🌐"),

@@ -58,7 +58,21 @@ async def _heartbeat_loop(ws) -> None:
         await ws.send(json.dumps({"type": "heartbeat", "ts": time.time()}))
 
 
-async def _receive_loop(ws) -> None:
+async def _idle_watchdog(ws, last_call: list, idle_timeout: float) -> None:
+    """Disconnect (and thus exit) after *idle_timeout* seconds without a call.
+
+    Hot-plug semantics: a node usually connects on demand, serves a few
+    calls, then drops off. The hub prunes the stale entry automatically.
+    """
+    while True:
+        await asyncio.sleep(5)
+        if time.time() - last_call[0] > idle_timeout:
+            logger.info("idle for %.0fs (limit %.0fs) — disconnecting", idle_timeout, idle_timeout)
+            await ws.close()
+            return
+
+
+async def _receive_loop(ws, last_call: list) -> None:
     async for raw in ws:
         try:
             msg = json.loads(raw)
@@ -66,18 +80,27 @@ async def _receive_loop(ws) -> None:
             continue
         if msg.get("type") != "call":
             continue
+        last_call[0] = time.time()
         resp = await _run_tool(str(msg.get("tool")), msg.get("args") or {})
         resp["type"] = "result"
         resp["id"] = msg.get("id")
         await ws.send(json.dumps(resp, ensure_ascii=False))
 
 
-async def run(hub_url: str, token: str, device: str, *, once: bool = False) -> None:
+async def run(
+    hub_url: str,
+    token: str,
+    device: str,
+    *,
+    once: bool = False,
+    idle_timeout: float = 0.0,
+) -> None:
     uri = _ws_uri(hub_url, token)
     logger.info(
         "hermes-node v%s connecting to %s as device %r",
         __version__, uri.split("?", 1)[0], device,
     )
+    last_call = [time.time()]
     while True:
         try:
             async with websockets.connect(uri, ping_interval=20, ping_timeout=20) as ws:
@@ -92,7 +115,20 @@ async def run(hub_url: str, token: str, device: str, *, once: bool = False) -> N
                     )
                 )
                 logger.info("connected to hub as %r", device)
-                await asyncio.gather(_heartbeat_loop(ws), _receive_loop(ws))
+                coros = [_heartbeat_loop(ws), _receive_loop(ws, last_call)]
+                if idle_timeout and idle_timeout > 0:
+                    coros.append(_idle_watchdog(ws, last_call, idle_timeout))
+                # FIRST_COMPLETED so the idle watchdog can tear the connection
+                # down without waiting for the heartbeat/receive loops to end.
+                tasks = [asyncio.ensure_future(c) for c in coros]
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for task in pending:
+                    task.cancel()
+                for task in pending:
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001

@@ -24,8 +24,13 @@ hub 暴露两个端点；所有帧均为 JSON。
    {"type":"hello","device":"macbook","platform":"macOS-15.0","capabilities":["exec_command","read_file","write_file","sys_info"]}
    ```
 3. 节点每 15s 发送心跳；hub 记录 `last_seen`
-4. hub 按 `HERMES_NODE_HUB_HEARTBEAT_TIMEOUT`（默认 45s）判定离线
-5. 断线重连：节点 5s 退避重连，重连后重新 hello；hub 侧 `_conns` 清理旧连接
+4. **断开即时离线**：WS 断开时 hub 立即标记 `disconnected_at`，`nodes_list` 立刻显示 offline（无需等心跳超时）
+5. **自动清理（热插拔）**：离线超过 `HERMES_NODE_HUB_OFFLINE_TTL`（默认 300s）的设备，在下次 `nodes_list` / `nodes_prune` 时自动从注册表删除
+6. 断线重连：节点 5s 退避重连，重连后重新 hello；hub 侧 `_conns` 清理旧连接、`disconnected_at` 复位
+
+### 热插拔节点（可选）
+
+节点支持 `--idle-timeout N`：连接后 N 秒内没有收到任何 call 就主动断开并退出（配合 `--once` 形成"用完即走"）。适合按需调用的场景 —— 节点不需要长期驻留，hub 会自动清理它的离线记录。
 
 ## 调用协议
 

@@ -56,11 +56,29 @@ hermes-node --hub http://hub-host:9721 --token <TOKEN> --device macbook
 在 Hermes 对话里（工具注入到所有平台）：
 
 ```
-nodes_list                      → 查看所有已注册设备 + 在线状态
+nodes_list                      → 查看所有已注册设备 + 在线状态（自动清理过期离线设备）
+nodes_prune                     → 手动清理离线设备（ttl=0 立即清掉所有离线）
 nodes_run device=macbook command="df -h"   → 在 macbook 上执行命令
 node_call device=devbox tool=read_file args={"path": "/etc/hosts"}
 nodes_fanout tool=sys_info      → 所有在线设备的系统信息一把梭
 ```
+
+### 热插拔（按需连接，用完即走）
+
+节点**不需要长期驻留** —— 按需启动、空闲自动退出、hub 自动清理：
+
+```bash
+# 连接后 60 秒内没有任务就自动断开退出（适合脚本/定时调用场景）
+hermes-node --hub http://hub-host:9731 --token <TOKEN> --device gpu_dev --idle-timeout 60
+
+# 断开后不再重连（配合 idle-timeout 组成"用完即走"）
+hermes-node --hub ... --device gpu_dev --idle-timeout 60 --once
+```
+
+hub 端配套行为（无需任何操作）：
+- 设备断开连接 → **立即标记离线**（不用等心跳超时）
+- 离线超过 `HERMES_NODE_HUB_OFFLINE_TTL`（默认 300s）→ 下次 `nodes_list`/`nodes_prune` 时自动从注册表删除
+- 设备随时重新连接 → 自动恢复 online，无需任何配置（真正的即插即用）
 
 ## 配置项（环境变量）
 
@@ -71,9 +89,10 @@ nodes_fanout tool=sys_info      → 所有在线设备的系统信息一把梭
 | `HERMES_NODE_HUB_TOKEN` | 空 | 共享密钥；为空时仅建议 loopback 部署 |
 | `HERMES_NODE_HUB_REGISTRY_FILE` | `~/.hermes/node-hub-registry.json` | 注册表持久化路径 |
 | `HERMES_NODE_HUB_HEARTBEAT_TIMEOUT` | `45` | 心跳超时（秒），超时判离线 |
+| `HERMES_NODE_HUB_OFFLINE_TTL` | `300` | 离线设备保留时长（秒），过期自动清理（热插拔） |
 | `HERMES_NODE_HUB_CALL_TIMEOUT` | `120` | 单次调用默认超时（秒） |
 
-node 端：`HERMES_NODE_HUB`（hub URL）、`HERMES_NODE_TOKEN`、`HERMES_NODE_DEVICE`（设备名，默认主机名）。
+node 端：`HERMES_NODE_HUB`（hub URL）、`HERMES_NODE_TOKEN`、`HERMES_NODE_DEVICE`（设备名，默认主机名）、`HERMES_NODE_IDLE_TIMEOUT`（空闲自动断开秒数，0=常驻）。
 
 ## 安全
 

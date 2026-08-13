@@ -19,7 +19,7 @@ logger = logging.getLogger("hermes_node_hub.registry")
 
 
 class Device:
-    __slots__ = ("node_id", "name", "platform", "capabilities", "addr", "last_seen")
+    __slots__ = ("node_id", "name", "platform", "capabilities", "addr", "last_seen", "disconnected_at")
 
     def __init__(
         self,
@@ -29,6 +29,7 @@ class Device:
         capabilities: List[str],
         addr: str,
         last_seen: float,
+        disconnected_at: Optional[float] = None,
     ) -> None:
         self.node_id = node_id
         self.name = name
@@ -36,6 +37,7 @@ class Device:
         self.capabilities = capabilities
         self.addr = addr
         self.last_seen = last_seen
+        self.disconnected_at = disconnected_at
 
 
 class Registry:
@@ -58,6 +60,7 @@ class Registry:
                         capabilities=list(d.get("capabilities", [])),
                         addr=d.get("addr", ""),
                         last_seen=float(d.get("last_seen", 0.0)),
+                        disconnected_at=d.get("disconnected_at"),
                     )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Failed to load registry %s: %s", self._path, exc)
@@ -72,6 +75,7 @@ class Registry:
                     "capabilities": d.capabilities,
                     "addr": d.addr,
                     "last_seen": d.last_seen,
+                    "disconnected_at": d.disconnected_at,
                 }
                 for node_id, d in self._devices.items()
             }
@@ -92,6 +96,7 @@ class Registry:
                     d.capabilities = capabilities
                     d.addr = addr
                     d.last_seen = now
+                    d.disconnected_at = None  # re-connected
                     self._save()
                     return node_id
             node_id = uuid.uuid4().hex[:8]
@@ -111,6 +116,19 @@ class Registry:
             dev = self._devices.get(node_id)
             if dev:
                 dev.last_seen = time.time()
+                dev.disconnected_at = None  # alive again
+
+    def mark_disconnected(self, node_id: str) -> None:
+        """Called on WS disconnect: the device goes offline immediately.
+
+        Hot-plug semantics: a node that dropped its connection is offline
+        right away, no waiting for the heartbeat timeout.
+        """
+        with self._lock:
+            dev = self._devices.get(node_id)
+            if dev and dev.disconnected_at is None:
+                dev.disconnected_at = time.time()
+                self._save()
 
     # -------------------------------------------------------------- query
     def resolve(self, name_or_id: str) -> Optional[str]:
@@ -127,7 +145,9 @@ class Registry:
         now = now or time.time()
         with self._lock:
             dev = self._devices.get(node_id)
-            return bool(dev) and (now - dev.last_seen) < config.heartbeat_timeout()
+            if not dev or dev.disconnected_at is not None:
+                return False
+            return (now - dev.last_seen) < config.heartbeat_timeout()
 
     def list_public(self) -> List[Dict[str, Any]]:
         now = time.time()
@@ -141,11 +161,41 @@ class Registry:
                         "platform": d.platform,
                         "capabilities": d.capabilities,
                         "addr": d.addr,
-                        "online": (now - d.last_seen) < config.heartbeat_timeout(),
+                        "online": (
+                            d.disconnected_at is None
+                            and (now - d.last_seen) < config.heartbeat_timeout()
+                        ),
                         "last_seen": d.last_seen,
+                        "disconnected_at": d.disconnected_at,
                     }
                 )
             return out
+
+    def prune_offline(self, ttl: Optional[int] = None) -> int:
+        """Remove devices that have been offline longer than *ttl* seconds.
+
+        Hot-plug friendly: nodes connect on demand and vanish when idle, so
+        stale entries are dropped (and the registry file rewritten) instead of
+        lingering forever. Offline age uses disconnected_at when known (WS
+        disconnect) and falls back to last heartbeat age otherwise.
+        Returns the number of pruned devices.
+        """
+        ttl = ttl if ttl is not None else config.offline_ttl()
+        now = time.time()
+        with self._lock:
+            dead = []
+            for nid, d in self._devices.items():
+                if d.disconnected_at is not None:
+                    offline_for = now - d.disconnected_at
+                else:
+                    offline_for = now - d.last_seen - config.heartbeat_timeout()
+                if offline_for > ttl:
+                    dead.append(nid)
+            for nid in dead:
+                del self._devices[nid]
+            if dead:
+                self._save()
+        return len(dead)
 
 
 _registry: Optional[Registry] = None

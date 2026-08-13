@@ -75,6 +75,16 @@ def heartbeat_timeout() -> int:
     return int(_env("HERMES_NODE_HUB_HEARTBEAT_TIMEOUT", "45"))
 
 
+def offline_ttl() -> int:
+    """Seconds a disconnected device stays in the registry before auto-prune.
+
+    Hot-plug semantics: nodes connect on demand and drop off when idle, so
+    stale offline entries are pruned automatically (on nodes_list / nodes_prune)
+    instead of lingering forever.
+    """
+    return int(_env("HERMES_NODE_HUB_OFFLINE_TTL", "300"))
+
+
 def call_timeout() -> int:
     return int(_env("HERMES_NODE_HUB_CALL_TIMEOUT", "120"))
 

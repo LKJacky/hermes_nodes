@@ -113,6 +113,9 @@ async def ws_endpoint(ws: WebSocket) -> None:
         if node_id is not None:
             with _conns_lock:
                 _conns.pop(node_id, None)
+            # Hot-plug: mark offline immediately so nodes_list reflects the
+            # disconnect right away (no waiting for the heartbeat timeout).
+            get_registry().mark_disconnected(node_id)
 
 
 def _ws_send(node_id: str, payload: dict) -> bool:
