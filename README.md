@@ -39,7 +39,7 @@ EOF
 
 ```bash
 # 直接从 git 仓库安装（node 包在仓库的 node/ 子目录）
-pip install "hermes-node @ git+https://github.com/LKJacky/hermes_nodes.git@main#subdirectory=node"
+pip install "hermes-node @ git+https://github.com/LKJacky/hermes_nodes.git#subdirectory=node"
 
 # 启动（前台试跑）
 hermes-node --hub http://hub-host:9721 --token <TOKEN> --device macbook

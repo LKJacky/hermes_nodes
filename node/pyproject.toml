@@ -2,7 +2,6 @@
 name = "hermes-node"
 version = "0.1.0"
 description = "Device-side client for hermes-nodes: exposes local tools (exec_command / read_file / write_file / sys_info) and stays persistently connected to a hermes-node-hub so the Hermes agent can call them remotely."
-readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 dependencies = [
