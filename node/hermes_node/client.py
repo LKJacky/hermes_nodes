@@ -52,6 +52,17 @@ async def _run_tool(tool: str, args: dict) -> dict:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
+def _truncate(value, limit: int = 200) -> str:
+    """JSON-serialize *value* and truncate to *limit* chars for log lines."""
+    try:
+        text = json.dumps(value, ensure_ascii=False)
+    except Exception:
+        text = repr(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"...(+{len(text) - limit} chars)"
+
+
 async def _heartbeat_loop(ws) -> None:
     while True:
         await asyncio.sleep(15)
@@ -81,9 +92,19 @@ async def _receive_loop(ws, last_call: list) -> None:
         if msg.get("type") != "call":
             continue
         last_call[0] = time.time()
-        resp = await _run_tool(str(msg.get("tool")), msg.get("args") or {})
+        call_id = msg.get("id")
+        tool = str(msg.get("tool"))
+        tool_args = msg.get("args") or {}
+        logger.info("▶ call #%s tool=%s args=%s", call_id, tool, _truncate(tool_args))
+        resp = await _run_tool(tool, tool_args)
+        ok = resp.get("ok")
+        summary = resp.get("output") if ok else resp.get("error")
+        logger.info(
+            "✔ call #%s done ok=%s result=%s",
+            call_id, ok, _truncate(summary, 300),
+        )
         resp["type"] = "result"
-        resp["id"] = msg.get("id")
+        resp["id"] = call_id
         await ws.send(json.dumps(resp, ensure_ascii=False))
 
 
