@@ -20,8 +20,8 @@
 ### 1. 安装 hub 插件（跑 Hermes 的那台机器）
 
 ```bash
-# 把插件目录拷到 Hermes 插件目录（或 git clone 后用 hermes plugins install）
-cp -r hub/hermes_node_hub ~/.hermes/plugins/hermes-node-hub
+# 直接从 git 仓库安装（hub 在仓库的 hub/hermes_node_hub 子目录）
+hermes plugins install https://github.com/LKJacky/hermes_nodes.git#hub/hermes_node_hub
 
 # 可选：配置 token 和端口（强烈建议配 token）
 cat >> ~/.hermes/.env <<'EOF'
@@ -32,12 +32,14 @@ EOF
 # 重启 Hermes —— 之后对话里就能用 nodes_list 等工具了
 ```
 
+> 仓库方式安装会拷贝到 `~/.hermes/plugins/`；升级用 `hermes plugins update hermes-node-hub`（或重新 install --force）。
 > 插件会在**第一次调用工具时**才启动服务器（懒加载），不占资源。
 
 ### 2. 在每台设备上装 node
 
 ```bash
-pip install ./node          # 或 pip install "hermes-node @ git+https://你的仓库.git"
+# 直接从 git 仓库安装（node 包在仓库的 node/ 子目录）
+pip install "hermes-node @ git+https://github.com/LKJacky/hermes_nodes.git@main#subdirectory=node"
 
 # 启动（前台试跑）
 hermes-node --hub http://hub-host:9721 --token <TOKEN> --device macbook

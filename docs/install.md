@@ -97,7 +97,9 @@ launchctl load ~/Library/LaunchAgents/com.hermes.node.plist
 ## 升级
 
 ```bash
-git -C <repo> pull
-pip install --upgrade ./node          # 每台设备
-cp -r hub/hermes_node_hub ~/.hermes/plugins/hermes-node-hub   # hub 机器
+# node 包（每台设备）
+pip install --upgrade "hermes-node @ git+https://github.com/LKJacky/hermes_nodes.git@main#subdirectory=node"
+
+# hub 插件（hub 机器）
+hermes plugins update hermes-node-hub   # 或重新 hermes plugins install --force <git-url>#hub/hermes_node_hub
 ```
