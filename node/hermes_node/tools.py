@@ -42,37 +42,76 @@ def exec_command(cmd: str, timeout: int = 120, cwd: str = "~") -> dict:
         return {"code": -1, "stdout": "", "stderr": f"{type(exc).__name__}: {exc}"}
 
 
+def _decode_prefix(data: bytes):
+    """Return (payload, is_binary) for a bytes chunk.
+
+    Strict UTF-8 wins -> (str, False). Retries after dropping up to 3 tail
+    bytes in case a multi-byte char was cut by the max_bytes cap. Anything
+    else -> (base64 str, True) so binary round-trips losslessly.
+    """
+    import base64
+
+    for cut in range(0, 4):
+        chunk = data if cut == 0 else data[:-cut]
+        try:
+            return chunk.decode("utf-8"), False
+        except UnicodeDecodeError:
+            continue
+    return base64.b64encode(data).decode("ascii"), True
+
+
 def read_file(path: str, max_bytes: int = 200_000) -> dict:
-    """Read a text file from the device (capped at max_bytes)."""
+    """Read a file from the device (capped at max_bytes).
+
+    Text files come back as UTF-8 text; binary files come back base64-encoded
+    with binary=True so any format round-trips losslessly.
+    """
     try:
         p = Path(_expand(path))
         if not p.exists():
             return {"error": f"no such file: {path}"}
         data = p.read_bytes()[:max_bytes]
-        try:
-            text = data.decode("utf-8", errors="replace")
-        except Exception:
-            text = repr(data[:512])
-        return {"path": str(p), "bytes": len(data), "content": text}
+        payload, is_binary = _decode_prefix(data)
+        return {
+            "path": str(p),
+            "bytes": len(data),
+            "content": payload,
+            "binary": is_binary,
+        }
     except Exception as exc:  # noqa: BLE001
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
-def write_file(path: str, content: str) -> dict:
-    """Write a text file on the device (creates parent directories)."""
+def write_file(path: str, content: str, binary: bool = False) -> dict:
+    """Write a file on the device (creates parent directories).
+
+    binary=False (default): content is UTF-8 text.
+    binary=True: content is base64-encoded bytes (any format).
+    """
     try:
         p = Path(_expand(path))
         p.parent.mkdir(parents=True, exist_ok=True)
+        if binary:
+            import base64
+
+            raw = base64.b64decode(content)
+            p.write_bytes(raw)
+            return {"ok": True, "path": str(p), "bytes": len(raw), "binary": True}
         p.write_text(content, encoding="utf-8")
-        return {"ok": True, "path": str(p), "bytes": len(content.encode("utf-8"))}
+        return {
+            "ok": True,
+            "path": str(p),
+            "bytes": len(content.encode("utf-8")),
+            "binary": False,
+        }
     except Exception as exc:  # noqa: BLE001
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
-def send_file(path: str, content: str) -> dict:
+def send_file(path: str, content: str, binary: bool = False) -> dict:
     """Alias of write_file - kept as a distinct tool name so the hub can
     route path_replaced payloads to it without ambiguity."""
-    return write_file(path, content)
+    return write_file(path, content, binary=binary)
 
 
 def sys_info() -> dict:

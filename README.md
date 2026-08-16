@@ -6,8 +6,8 @@
 ┌─ 每台设备 (hermes-node) ────────┐      ┌─ Hermes 进程内 (hermes-node-hub 插件) ─┐
 │  本地工具:                       │      │  HTTP+WS 服务器 (默认 127.0.0.1:9721)    │
 │  · exec_command  执行命令        │─────▶│  WS 注册 (hello/心跳/调用/结果)         │
-│  · read_file     读文件          │ WS   │  注册表持久化 (JSON)                    │
-│  · write_file    写文件          │ 心跳 │  5 个工具:                             │
+│  · read_file     读文件(任意格式) │ WS   │  注册表持久化 (JSON)                    │
+│  · write_file    写文件(任意格式) │ 心跳 │  7 个工具:                             │
 │  · sys_info      系统信息        │◀─────│  nodes_list / node_call /              │
 │  · send_file  本机文件写入节点    │      │  nodes_run / nodes_fanout /            │
 │  断线自动重连 (5s)               │      │  nodes_prune / send_file /             │
@@ -62,8 +62,8 @@ nodes_list                      → 查看所有已注册设备 + 在线状态�
 nodes_prune                     → 手动清理离线设备（ttl=0 立即清掉所有离线）
 nodes_run device=macbook command="df -h"   → 在 macbook 上执行命令
 node_call device=devbox tool=read_file args={"path": "/etc/hosts"}
-send_file path=/data/x.py content=/local/script.py   → 把本机文件内容写入节点（content 默认是本地路径，hub 读取后经内部 WS 传输，不经过 LLM 工具参数；传 extra={"path_replace": []} 则 content 按内联文本处理）
-fetch_file path=/data/x.py dest=/local/x.py   → 把节点文件拉回本机（hub 经内部 WS 读节点内容后写入本地 dest，同样不经过 LLM 工具参数）
+send_file path=/data/x.py content=/local/script.py   → 把本机文件写入节点（content 默认是本地路径，hub 读取后经内部 WS 传输，不经过 LLM 工具参数；传 extra={"path_replace": []} 则 content 按内联文本处理；任意格式：文本直传，二进制自动 base64）
+fetch_file path=/data/x.py dest=/local/x.py   → 把节点文件拉回本机（hub 经内部 WS 读节点内容后写入本地 dest，同样不经过 LLM 工具参数；任意格式：文本直写，二进制自动 base64 解码）
 nodes_fanout tool=sys_info      → 所有在线设备的系统信息一把梭
 ```
 
@@ -95,7 +95,7 @@ hub 端配套行为（无需任何操作）：
 | `HERMES_NODE_HUB_HEARTBEAT_TIMEOUT` | `45` | 心跳超时（秒），超时判离线 |
 | `HERMES_NODE_HUB_OFFLINE_TTL` | `300` | 离线设备保留时长（秒），过期自动清理（热插拔） |
 | `HERMES_NODE_HUB_CALL_TIMEOUT` | `120` | 单次调用默认超时（秒） |
-| `HERMES_NODE_HUB_SEND_FILE_MAX_BYTES` | `67108864` | send_file 读取本地文件的大小上限（字节），超限提示改用 exec_command 脚本（如 curl） |
+| `HERMES_NODE_HUB_SEND_FILE_MAX_BYTES` | `67108864` | send_file 读取本地文件的大小上限（字节，文本或二进制），超限提示改用 exec_command 脚本（如 curl） |
 
 node 端：`HERMES_NODE_HUB`（hub URL）、`HERMES_NODE_TOKEN`、`HERMES_NODE_DEVICE`（设备名，默认主机名）、`HERMES_NODE_IDLE_TIMEOUT`（空闲自动断开秒数，0=常驻）。
 

@@ -91,7 +91,8 @@ def call_timeout() -> int:
 
 def send_file_max_bytes() -> int:
     """Cap on how large a local file the hub will read for send_file's
-    path_replace flow. Files beyond this should be pulled on the node via exec_command (e.g. curl)."""
+    path_replace flow (text or binary). Files beyond this should be pulled
+    on the node via exec_command (e.g. curl)."""
     return int(_env("HERMES_NODE_HUB_SEND_FILE_MAX_BYTES", str(64 * 1024 * 1024)))
 
 

@@ -50,7 +50,7 @@ _NODES_PRUNE_SCHEMA = {
 
 _NODE_CALL_SCHEMA = {
     "name": "node_call",
-    "description": "Call a tool on a specific registered node device. Available tools: exec_command(cmd, timeout, cwd) run a shell command; read_file(path, max_bytes) read a text file; write_file(path, content) write a text file; sys_info() system snapshot; send_file(path, content) write a text file (content is a local path the hub reads by default). The device must be online.",
+    "description": "Call a tool on a specific registered node device. Available tools: exec_command(cmd, timeout, cwd) run a shell command; read_file(path, max_bytes) read a file (text or base64 binary); write_file(path, content, binary=False) write a file; send_file(path, content, binary=False) write a file (content is a local path the hub reads by default). The device must be online.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -104,7 +104,7 @@ _NODES_RUN_SCHEMA = {
 
 _NODES_FANOUT_SCHEMA = {
     "name": "nodes_fanout",
-    "description": "Call the same tool with the same args on every online device in parallel and collect all results. Tools per device: exec_command, read_file, write_file, sys_info, send_file.",
+    "description": "Call the same tool with the same args on every online device in parallel and collect all results. Tools per device: exec_command, read_file, write_file, sys_info, send_file, fetch_file.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -132,7 +132,8 @@ _SEND_FILE_SCHEMA = {
         "content is treated as a LOCAL FILE PATH by default: the hub reads "
         "that file and writes its contents to path on the node. Pass "
         "extra={'path_replace': []} to write content as inline text instead. "
-        "Use for docs/scripts/configs/text data; for binary or very large "
+        "Supports ANY file format: UTF-8 text is sent as-is, binary files are "
+        "automatically base64-encoded and decoded on the node. For very large "
         "files prefer exec_command on the node (e.g. curl) to pull them directly."
     ),
     "parameters": {
@@ -175,12 +176,12 @@ _SEND_FILE_SCHEMA = {
 _FETCH_FILE_SCHEMA = {
     "name": "fetch_file",
     "description": (
-        "Fetch a text file from a remote node and write it to a LOCAL path "
-        "on this hub/agent side. path is the source file ON THE NODE; dest "
-        "is the destination path LOCALLY (parent dirs are created). The file "
-        "content travels over the hub-node WebSocket, not through tool "
-        "arguments. Use for docs/scripts/configs/text data; for binary or "
-        "very large files handle them on the node via exec_command instead."
+        "Fetch a file from a remote node and write it to a LOCAL path on this "
+        "hub/agent side. path is the source file ON THE NODE; dest is the "
+        "destination path LOCALLY (parent dirs are created). The file content "
+        "travels over the hub-node WebSocket, not through tool arguments. "
+        "Supports ANY file format: text files are written as text, binary "
+        "files are automatically base64-encoded by the node and decoded locally."
     ),
     "parameters": {
         "type": "object",
@@ -199,7 +200,7 @@ _FETCH_FILE_SCHEMA = {
             },
             "max_bytes": {
                 "type": "integer",
-                "description": "Max bytes to read from the node file (default 200000, matches the node read_file cap).",
+                "description": "Max bytes to read from the node file (default 20000000 / 20MB; max 100000000).",
             },
             "timeout": {
                 "type": "integer",
@@ -212,8 +213,13 @@ _FETCH_FILE_SCHEMA = {
 
 
 
-def _read_local_text(path_str: str, max_bytes: int) -> str:
-    """Read a hub-side local text file, enforcing the size cap."""
+def _read_local_file(path_str: str, max_bytes: int) -> tuple:
+    """Read a hub-side local file, enforcing the size cap.
+
+    Returns (payload, is_binary): UTF-8 text comes back as str; any other
+    format is returned base64-encoded so it round-trips losslessly over the
+    JSON WebSocket.
+    """
     from pathlib import Path as _P
 
     p = _P(path_str).expanduser()
@@ -228,16 +234,15 @@ def _read_local_text(path_str: str, max_bytes: int) -> str:
         raise ValueError(
             f"local file {path_str!r} is {size} bytes, exceeding the "
             f"{max_bytes} byte cap (HERMES_NODE_HUB_SEND_FILE_MAX_BYTES). "
-            "Use exec_command with curl on the node for large files."
+            "Use exec_command with curl on the node for larger files."
         )
     data = p.read_bytes()
     try:
-        return data.decode("utf-8")
+        return data.decode("utf-8"), False
     except UnicodeDecodeError:
-        raise ValueError(
-            f"local file {path_str!r} is not valid UTF-8 text. send_file "
-            "writes text files; binary content should be pulled on the node via exec_command (e.g. curl)."
-        ) from None
+        import base64
+
+        return base64.b64encode(data).decode("ascii"), True
 
 
 def _first_online_node_id():
@@ -260,9 +265,10 @@ def _handle_send_file(args: dict, **kwargs) -> str:
         isinstance(f, str) for f in path_replace
     ):
         return tool_error("extra.path_replace must be a list of field names")
+    is_binary = False
     if "content" in path_replace:
         try:
-            content = _read_local_text(content, config.send_file_max_bytes())
+            content, is_binary = _read_local_file(content, config.send_file_max_bytes())
         except ValueError as exc:
             return tool_error(str(exc))
     device = args.get("device")
@@ -277,7 +283,10 @@ def _handle_send_file(args: dict, **kwargs) -> str:
                 "no online device to send the file to; pass device=... or start a node"
             )
     result = call_device(
-        node_id, "send_file", {"path": path, "content": content}, args.get("timeout")
+        node_id,
+        "send_file",
+        {"path": path, "content": content, "binary": is_binary},
+        args.get("timeout"),
     )
     if not result.get("ok"):
         return tool_error(result.get("error", "call failed"))
@@ -291,7 +300,7 @@ def _handle_fetch_file(args: dict, **kwargs) -> str:
     dest = args.get("dest")
     if not path or not dest:
         return tool_error("both 'path' and 'dest' are required")
-    max_bytes = args.get("max_bytes") or 200_000
+    max_bytes = args.get("max_bytes") or 20_000_000
     try:
         max_bytes = int(max_bytes)
     except (TypeError, ValueError):
@@ -328,7 +337,12 @@ def _handle_fetch_file(args: dict, **kwargs) -> str:
 
         dp = _P(dest).expanduser()
         dp.parent.mkdir(parents=True, exist_ok=True)
-        dp.write_text(content, encoding="utf-8")
+        if isinstance(output, dict) and output.get("binary"):
+            import base64
+
+            dp.write_bytes(base64.b64decode(content))
+        else:
+            dp.write_text(content, encoding="utf-8")
     except OSError as exc:
         return tool_error(f"cannot write local dest {dest!r}: {exc}")
     node_path = output.get("path", path) if isinstance(output, dict) else path
@@ -339,6 +353,7 @@ def _handle_fetch_file(args: dict, **kwargs) -> str:
             "dest": str(dp),
             "node_path": str(node_path),
             "bytes": nbytes,
+            "binary": bool(output.get("binary")) if isinstance(output, dict) else False,
             "note": "written locally on hub side",
         },
     )
