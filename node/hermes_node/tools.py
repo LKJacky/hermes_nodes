@@ -69,6 +69,12 @@ def write_file(path: str, content: str) -> dict:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
+def send_file(path: str, content: str) -> dict:
+    """Alias of write_file - kept as a distinct tool name so the hub can
+    route path_replaced payloads to it without ambiguity."""
+    return write_file(path, content)
+
+
 def sys_info() -> dict:
     """CPU / memory / disk / load snapshot for fleet health checks."""
     info = {
@@ -123,4 +129,5 @@ ALL_TOOLS = {
     "read_file": read_file,
     "write_file": write_file,
     "sys_info": sys_info,
+    "send_file": send_file,
 }

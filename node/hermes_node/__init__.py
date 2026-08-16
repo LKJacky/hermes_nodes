@@ -2,4 +2,4 @@
 
 __version__ = "0.1.0"
 
-CAPABILITIES = ["exec_command", "read_file", "write_file", "sys_info"]
+CAPABILITIES = ["exec_command", "read_file", "write_file", "sys_info", "send_file"]

@@ -52,6 +52,7 @@ node → hub: {"type":"result","id":"<hex>","ok":false,"error":"..."}
 | `exec_command` | `cmd`(必填), `timeout`=120, `cwd`="~" | `{code, stdout, stderr, duration_ms}` |
 | `read_file` | `path`(必填), `max_bytes`=200000 | `{path, bytes, content}` 或 `{error}` |
 | `write_file` | `path`(必填), `content`(必填) | `{ok, path, bytes}` 或 `{error}` |
+| `send_file` | `path`(必填), `content`(必填) | `{ok, path, bytes}` 或 `{error}`；hub 侧 send_file 会把 content 从本地路径解析为内容后再调用本工具 |
 | `sys_info` | — | `{hostname, platform, cpu_count, load_avg, mem_*, disk_free_gb, gpu, ts}` |
 
 扩展工具：在 `node/hermes_node/tools.py` 加函数并加入 `ALL_TOOLS`，capabilities 自动带上。

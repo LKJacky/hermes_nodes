@@ -7,13 +7,14 @@
 │  本地工具:                       │      │  HTTP+WS 服务器 (默认 127.0.0.1:9721)    │
 │  · exec_command  执行命令        │─────▶│  WS 注册 (hello/心跳/调用/结果)         │
 │  · read_file     读文件          │ WS   │  注册表持久化 (JSON)                    │
-│  · write_file    写文件          │ 心跳 │  4 个工具:                             │
+│  · write_file    写文件          │ 心跳 │  5 个工具:                             │
 │  · sys_info      系统信息        │◀─────│  nodes_list / node_call /              │
-│  断线自动重连 (5s)               │      │  nodes_run / nodes_fanout               │
+│  · send_file  本机文件写入节点    │      │  nodes_run / nodes_fanout /            │
+│  断线自动重连 (5s)               │      │  nodes_prune                           │
 └────────────────────────────────┘      └───────────────────────────────────────┘
 ```
 
-**核心设计**：hub 只注册 4 个固定分发工具，设备注册是**数据**（注册表）而不是工具定义 —— 新设备上线后**无需重启 Hermes**，`nodes_list` 立即可见、`node_call` 立即可调。
+**核心设计**：hub 只注册 6 个固定分发工具（nodes_list / nodes_prune / node_call / nodes_run / nodes_fanout / send_file），设备注册是**数据**（注册表）而不是工具定义 —— 新设备上线后**无需重启 Hermes**，`nodes_list` 立即可见、`node_call` 立即可调。
 
 ## 快速开始
 
@@ -60,6 +61,7 @@ nodes_list                      → 查看所有已注册设备 + 在线状态�
 nodes_prune                     → 手动清理离线设备（ttl=0 立即清掉所有离线）
 nodes_run device=macbook command="df -h"   → 在 macbook 上执行命令
 node_call device=devbox tool=read_file args={"path": "/etc/hosts"}
+send_file path=/data/x.py content=/local/script.py   → 把本机文件内容写入节点（content 默认是本地路径，hub 读取后经内部 WS 传输，不经过 LLM 工具参数；传 extra={"path_replace": []} 则 content 按内联文本处理）
 nodes_fanout tool=sys_info      → 所有在线设备的系统信息一把梭
 ```
 
@@ -91,6 +93,7 @@ hub 端配套行为（无需任何操作）：
 | `HERMES_NODE_HUB_HEARTBEAT_TIMEOUT` | `45` | 心跳超时（秒），超时判离线 |
 | `HERMES_NODE_HUB_OFFLINE_TTL` | `300` | 离线设备保留时长（秒），过期自动清理（热插拔） |
 | `HERMES_NODE_HUB_CALL_TIMEOUT` | `120` | 单次调用默认超时（秒） |
+| `HERMES_NODE_HUB_SEND_FILE_MAX_BYTES` | `67108864` | send_file 读取本地文件的大小上限（字节），超限提示改用 exec_command 脚本（如 curl） |
 
 node 端：`HERMES_NODE_HUB`（hub URL）、`HERMES_NODE_TOKEN`、`HERMES_NODE_DEVICE`（设备名，默认主机名）、`HERMES_NODE_IDLE_TIMEOUT`（空闲自动断开秒数，0=常驻）。
 
@@ -103,7 +106,7 @@ node 端：`HERMES_NODE_HUB`（hub URL）、`HERMES_NODE_TOKEN`、`HERMES_NODE_D
 ## 目录结构
 
 ```
-hub/hermes_node_hub/   Hermes 插件（server / registry / 4 个工具）
+hub/hermes_node_hub/   Hermes 插件（server / registry / 6 个工具）
 node/                  设备端 Python 包（pip 安装）
 docs/protocol.md       注册与调用协议规范
 docs/install.md        systemd / launchd / Tailscale 部署

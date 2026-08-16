@@ -50,7 +50,7 @@ _NODES_PRUNE_SCHEMA = {
 
 _NODE_CALL_SCHEMA = {
     "name": "node_call",
-    "description": "Call a tool on a specific registered node device (e.g. exec_command, read_file, write_file, sys_info). The device must be online.",
+    "description": "Call a tool on a specific registered node device. Available tools: exec_command(cmd, timeout, cwd) run a shell command; read_file(path, max_bytes) read a text file; write_file(path, content) write a text file; sys_info() system snapshot; send_file(path, content) write a text file (content is a local path the hub reads by default). The device must be online.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -104,7 +104,7 @@ _NODES_RUN_SCHEMA = {
 
 _NODES_FANOUT_SCHEMA = {
     "name": "nodes_fanout",
-    "description": "Call the same tool with the same args on every online device in parallel and collect all results.",
+    "description": "Call the same tool with the same args on every online device in parallel and collect all results. Tools per device: exec_command, read_file, write_file, sys_info, send_file.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -124,6 +124,124 @@ _NODES_FANOUT_SCHEMA = {
         "required": ["tool"],
     },
 }
+
+_SEND_FILE_SCHEMA = {
+    "name": "send_file",
+    "description": (
+        "Write a local file (on this hub/agent side) to a remote node. "
+        "content is treated as a LOCAL FILE PATH by default: the hub reads "
+        "that file and writes its contents to path on the node. Pass "
+        "extra={'path_replace': []} to write content as inline text instead. "
+        "Use for docs/scripts/configs/text data; for binary or very large "
+        "files prefer exec_command on the node (e.g. curl) to pull them directly."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "device": {
+                "type": "string",
+                "description": "Device name or node_id (optional; defaults to the first online device).",
+            },
+            "path": {
+                "type": "string",
+                "description": "Destination path on the node (parent dirs are created).",
+            },
+            "content": {
+                "type": "string",
+                "description": "Local file path to read (default), or inline text when extra.path_replace is [].",
+            },
+            "extra": {
+                "type": "object",
+                "description": 'Optional config. {"path_replace": ["content"]} (default) means content is a local path to read; {"path_replace": []} means content is inline text.',
+                "properties": {
+                    "path_replace": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Field names whose string values are local file paths to read and replace with file contents.",
+                    },
+                },
+                "default": {"path_replace": ["content"]},
+            },
+            "timeout": {
+                "type": "integer",
+                "description": "Per-call timeout in seconds (default 120).",
+            },
+        },
+        "required": ["path", "content"],
+    },
+}
+
+
+def _read_local_text(path_str: str, max_bytes: int) -> str:
+    """Read a hub-side local text file, enforcing the size cap."""
+    from pathlib import Path as _P
+
+    p = _P(path_str).expanduser()
+    if not p.is_file():
+        raise ValueError(
+            f"content {path_str!r} is not a readable local file. "
+            "send_file treats content as a LOCAL PATH by default; pass "
+            "extra={'path_replace': []} to send inline text instead."
+        )
+    size = p.stat().st_size
+    if size > max_bytes:
+        raise ValueError(
+            f"local file {path_str!r} is {size} bytes, exceeding the "
+            f"{max_bytes} byte cap (HERMES_NODE_HUB_SEND_FILE_MAX_BYTES). "
+            "Use exec_command with curl on the node for large files."
+        )
+    data = p.read_bytes()
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError(
+            f"local file {path_str!r} is not valid UTF-8 text. send_file "
+            "writes text files; binary content should be pulled on the node via exec_command (e.g. curl)."
+        ) from None
+
+
+def _first_online_node_id():
+    for dev in get_registry().list_public():
+        if dev["online"]:
+            return dev["node_id"]
+    return None
+
+
+def _handle_send_file(args: dict, **kwargs) -> str:
+    start_server()
+    args = args or {}
+    path = args.get("path")
+    content = args.get("content")
+    if not path or content is None:
+        return tool_error("both 'path' and 'content' are required")
+    extra = args.get("extra") or {}
+    path_replace = extra.get("path_replace", ["content"])
+    if not isinstance(path_replace, list) or not all(
+        isinstance(f, str) for f in path_replace
+    ):
+        return tool_error("extra.path_replace must be a list of field names")
+    if "content" in path_replace:
+        try:
+            content = _read_local_text(content, config.send_file_max_bytes())
+        except ValueError as exc:
+            return tool_error(str(exc))
+    device = args.get("device")
+    if device:
+        node_id, err = _resolve_or_error(device)
+        if err:
+            return err
+    else:
+        node_id = _first_online_node_id()
+        if node_id is None:
+            return tool_error(
+                "no online device to send the file to; pass device=... or start a node"
+            )
+    result = call_device(
+        node_id, "send_file", {"path": path, "content": content}, args.get("timeout")
+    )
+    if not result.get("ok"):
+        return tool_error(result.get("error", "call failed"))
+    return tool_result(**result)
 
 
 def _resolve_or_error(device: str):
@@ -223,6 +341,7 @@ _TOOLS = (
     ("node_call", _NODE_CALL_SCHEMA, _handle_node_call, "🖥️"),
     ("nodes_run", _NODES_RUN_SCHEMA, _handle_nodes_run, "⚡"),
     ("nodes_fanout", _NODES_FANOUT_SCHEMA, _handle_nodes_fanout, "🌐"),
+    ("send_file", _SEND_FILE_SCHEMA, _handle_send_file, "📤"),
 )
 
 
