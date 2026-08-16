@@ -124,7 +124,12 @@ async def run(
     last_call = [time.time()]
     while True:
         try:
-            async with websockets.connect(uri, ping_interval=20, ping_timeout=20) as ws:
+            async with websockets.connect(
+                uri,
+                ping_interval=20,
+                ping_timeout=20,
+                max_size=256 * 1024 * 1024,  # allow large file frames (default 1MB would drop them)
+            ) as ws:
                 await ws.send(
                     json.dumps(
                         {

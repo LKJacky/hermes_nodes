@@ -197,6 +197,7 @@ def start_server() -> bool:
                     port=config.hub_port(),
                     log_level="warning",
                     access_log=False,
+                    ws_max_size=256 * 1024 * 1024,  # allow large file frames (default 16MB would reject them)
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.error("hermes-node-hub server exited: %s", exc)
