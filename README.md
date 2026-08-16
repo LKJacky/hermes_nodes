@@ -10,11 +10,12 @@
 │  · write_file    写文件          │ 心跳 │  5 个工具:                             │
 │  · sys_info      系统信息        │◀─────│  nodes_list / node_call /              │
 │  · send_file  本机文件写入节点    │      │  nodes_run / nodes_fanout /            │
-│  断线自动重连 (5s)               │      │  nodes_prune                           │
+│  断线自动重连 (5s)               │      │  nodes_prune / send_file /             │
+│                                  │      │  fetch_file                           │
 └────────────────────────────────┘      └───────────────────────────────────────┘
 ```
 
-**核心设计**：hub 只注册 6 个固定分发工具（nodes_list / nodes_prune / node_call / nodes_run / nodes_fanout / send_file），设备注册是**数据**（注册表）而不是工具定义 —— 新设备上线后**无需重启 Hermes**，`nodes_list` 立即可见、`node_call` 立即可调。
+**核心设计**：hub 只注册 7 个固定分发工具（nodes_list / nodes_prune / node_call / nodes_run / nodes_fanout / send_file / fetch_file），设备注册是**数据**（注册表）而不是工具定义 —— 新设备上线后**无需重启 Hermes**，`nodes_list` 立即可见、`node_call` 立即可调。
 
 ## 快速开始
 
@@ -62,6 +63,7 @@ nodes_prune                     → 手动清理离线设备（ttl=0 立即清�
 nodes_run device=macbook command="df -h"   → 在 macbook 上执行命令
 node_call device=devbox tool=read_file args={"path": "/etc/hosts"}
 send_file path=/data/x.py content=/local/script.py   → 把本机文件内容写入节点（content 默认是本地路径，hub 读取后经内部 WS 传输，不经过 LLM 工具参数；传 extra={"path_replace": []} 则 content 按内联文本处理）
+fetch_file path=/data/x.py dest=/local/x.py   → 把节点文件拉回本机（hub 经内部 WS 读节点内容后写入本地 dest，同样不经过 LLM 工具参数）
 nodes_fanout tool=sys_info      → 所有在线设备的系统信息一把梭
 ```
 

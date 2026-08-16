@@ -172,6 +172,46 @@ _SEND_FILE_SCHEMA = {
 }
 
 
+_FETCH_FILE_SCHEMA = {
+    "name": "fetch_file",
+    "description": (
+        "Fetch a text file from a remote node and write it to a LOCAL path "
+        "on this hub/agent side. path is the source file ON THE NODE; dest "
+        "is the destination path LOCALLY (parent dirs are created). The file "
+        "content travels over the hub-node WebSocket, not through tool "
+        "arguments. Use for docs/scripts/configs/text data; for binary or "
+        "very large files handle them on the node via exec_command instead."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "device": {
+                "type": "string",
+                "description": "Device name or node_id (optional; defaults to the first online device).",
+            },
+            "path": {
+                "type": "string",
+                "description": "Source file path on the node.",
+            },
+            "dest": {
+                "type": "string",
+                "description": "Local destination path on this hub/agent side (parent dirs created).",
+            },
+            "max_bytes": {
+                "type": "integer",
+                "description": "Max bytes to read from the node file (default 200000, matches the node read_file cap).",
+            },
+            "timeout": {
+                "type": "integer",
+                "description": "Per-call timeout in seconds (default 120).",
+            },
+        },
+        "required": ["path", "dest"],
+    },
+}
+
+
+
 def _read_local_text(path_str: str, max_bytes: int) -> str:
     """Read a hub-side local text file, enforcing the size cap."""
     from pathlib import Path as _P
@@ -242,6 +282,67 @@ def _handle_send_file(args: dict, **kwargs) -> str:
     if not result.get("ok"):
         return tool_error(result.get("error", "call failed"))
     return tool_result(**result)
+
+
+def _handle_fetch_file(args: dict, **kwargs) -> str:
+    start_server()
+    args = args or {}
+    path = args.get("path")
+    dest = args.get("dest")
+    if not path or not dest:
+        return tool_error("both 'path' and 'dest' are required")
+    max_bytes = args.get("max_bytes") or 200_000
+    try:
+        max_bytes = int(max_bytes)
+    except (TypeError, ValueError):
+        return tool_error("max_bytes must be an integer")
+    if max_bytes < 1 or max_bytes > 100_000_000:
+        return tool_error("max_bytes must be between 1 and 100000000")
+    device = args.get("device")
+    if device:
+        node_id, err = _resolve_or_error(device)
+        if err:
+            return err
+    else:
+        node_id = _first_online_node_id()
+        if node_id is None:
+            return tool_error(
+                "no online device to fetch from; pass device=... or start a node"
+            )
+    result = call_device(
+        node_id,
+        "read_file",
+        {"path": path, "max_bytes": max_bytes},
+        args.get("timeout"),
+    )
+    if not result.get("ok"):
+        return tool_error(result.get("error", "call failed"))
+    output = result.get("output") or {}
+    if isinstance(output, dict) and output.get("error"):
+        return tool_error(str(output["error"]))
+    content = output.get("content") if isinstance(output, dict) else str(output)
+    if content is None:
+        return tool_error("node returned no content")
+    try:
+        from pathlib import Path as _P
+
+        dp = _P(dest).expanduser()
+        dp.parent.mkdir(parents=True, exist_ok=True)
+        dp.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        return tool_error(f"cannot write local dest {dest!r}: {exc}")
+    node_path = output.get("path", path) if isinstance(output, dict) else path
+    nbytes = output.get("bytes") if isinstance(output, dict) else len(content.encode("utf-8"))
+    return tool_result(
+        ok=True,
+        output={
+            "dest": str(dp),
+            "node_path": str(node_path),
+            "bytes": nbytes,
+            "note": "written locally on hub side",
+        },
+    )
+
 
 
 def _resolve_or_error(device: str):
@@ -342,6 +443,7 @@ _TOOLS = (
     ("nodes_run", _NODES_RUN_SCHEMA, _handle_nodes_run, "⚡"),
     ("nodes_fanout", _NODES_FANOUT_SCHEMA, _handle_nodes_fanout, "🌐"),
     ("send_file", _SEND_FILE_SCHEMA, _handle_send_file, "📤"),
+    ("fetch_file", _FETCH_FILE_SCHEMA, _handle_fetch_file, "📥"),
 )
 
 
